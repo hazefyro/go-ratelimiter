@@ -8,7 +8,7 @@ import (
 )
 
 type RateLimiter struct {
-	mu        sync.Mutex
+	mu        sync.RWMutex
 	rateLimit rate.Limit
 	visitors  map[string]*visitor
 	options   Options
