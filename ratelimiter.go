@@ -44,11 +44,11 @@ func New(options *Options) (*RateLimiter, error) {
 	return rl, nil
 }
 
-func (rl *RateLimiter) Allow(key string) bool {
+func (rl *RateLimiter) Allow(key string) error {
 	return rl.AllowN(key, 1)
 }
 
-func (rl *RateLimiter) AllowN(key string, n int) bool {
+func (rl *RateLimiter) AllowN(key string, n int) error {
 	now := time.Now()
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -64,7 +64,7 @@ func (rl *RateLimiter) AllowN(key string, n int) bool {
 	v.lastSeen = now
 
 	if now.Before(v.bannedUntil) {
-		return false
+		return ErrBanned
 	}
 
 	if rl.options.BanDuration > 0 && time.Since(v.windowStart) > rl.options.ViolationWindow {
@@ -80,10 +80,10 @@ func (rl *RateLimiter) AllowN(key string, n int) bool {
 				v.violations = 0
 			}
 		}
-		return false
+		return ErrRateLimited
 	}
 
-	return true
+	return nil
 }
 
 func (rl *RateLimiter) cleanup() {
