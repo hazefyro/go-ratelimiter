@@ -27,7 +27,7 @@ func RealIPKey(r *http.Request) string {
 	return RemoteAddrKey(r)
 }
 
-func ForwrdedForKey(r *http.Request) string {
+func ForwardedForKey(r *http.Request) string {
 	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
 		return ip
 	}
