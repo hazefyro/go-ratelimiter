@@ -67,16 +67,16 @@ func (rl *RateLimiter) AllowN(key string, n int) error {
 		return ErrBanned
 	}
 
-	if rl.options.BanDuration > 0 && time.Since(v.windowStart) > rl.options.ViolationWindow {
+	if rl.options.Banning != nil && time.Since(v.windowStart) > rl.options.Banning.Window {
 		v.violations = 0
 		v.windowStart = now
 	}
 
 	if !v.limiter.AllowN(now, n) {
-		if rl.options.BanDuration > 0 {
+		if rl.options.Banning != nil {
 			v.violations++
-			if v.violations >= rl.options.ViolationThreshold {
-				v.bannedUntil = now.Add(rl.options.BanDuration)
+			if v.violations >= rl.options.Banning.Threshold {
+				v.bannedUntil = now.Add(rl.options.Banning.Duration)
 				v.violations = 0
 			}
 		}
