@@ -14,6 +14,7 @@ type visitor struct {
 	bannedUntil time.Time
 }
 
+// VisitorStats holds a point-in-time snapshot of a visitor's state.
 type VisitorStats struct {
 	Banned      bool
 	BannedUntil time.Time
