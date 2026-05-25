@@ -161,3 +161,35 @@ func TestAllow_lifts_ban_after_durationfunc(t *testing.T) {
 	}
 
 }
+
+// STATS TESTING TODO
+
+func TestAllow_creates_visitor_on_first_call(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 10,
+		Bucket:    10,
+	})
+
+	rl.Allow(key)
+
+	if _, ok := rl.Stats()[key]; !ok {
+		t.Fatalf("expected visitor %q to exist", key)
+	}
+}
+
+func TestAllow_independent_visitors(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 10,
+		Bucket:    10,
+	})
+
+	var key2 = "192.168.100.1"
+
+	rl.Allow(key)
+	rl.Allow(key)
+	rl.Allow(key2)
+
+	if rl.Stats()[key] == rl.Stats()[key2] {
+		t.Fatalf("expected visitors %q and %q to be different", key, key2)
+	}
+}
