@@ -13,3 +13,10 @@ type visitor struct {
 	windowStart time.Time
 	bannedUntil time.Time
 }
+
+type VisitorStats struct {
+	Banned      bool
+	BannedUntil time.Time
+	Violations  int
+	LastSeen    time.Time
+}

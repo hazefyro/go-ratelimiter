@@ -105,6 +105,23 @@ func (rl *RateLimiter) cleanup() {
 	}
 }
 
+func (rl *RateLimiter) Stats() map[string]VisitorStats {
+	rl.mu.RLock()
+	defer rl.mu.RUnlock()
+
+	now := time.Now()
+	result := make(map[string]VisitorStats, len(rl.visitors))
+	for key, v := range rl.visitors {
+		result[key] = VisitorStats{
+			Banned:      now.Before(v.bannedUntil),
+			BannedUntil: v.bannedUntil,
+			Violations:  v.violations,
+			LastSeen:    v.lastSeen,
+		}
+	}
+	return result
+}
+
 func (rl *RateLimiter) Stop() {
 	close(rl.stop)
 }
