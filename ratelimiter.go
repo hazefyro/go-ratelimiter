@@ -54,7 +54,8 @@ func (rl *RateLimiter) Allow(key string) error {
 	return rl.AllowN(key, 1)
 }
 
-// AllowN is like Allow but consumes n tokens at once.
+// AllowN reports whether the visitor identified by key may make a request that costs n tokens.
+// Returns ErrRateLimited or ErrBanned if the request is denied.
 func (rl *RateLimiter) AllowN(key string, n int) error {
 	now := time.Now()
 	rl.mu.Lock()
