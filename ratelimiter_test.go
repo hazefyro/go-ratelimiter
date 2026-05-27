@@ -2,10 +2,12 @@ package ratelimiter_test
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	ratelimiter "github.com/haze/go-ratelimiter"
+	"go.uber.org/goleak"
 )
 
 const key = "192.0.2.1"
@@ -55,6 +57,33 @@ func TestAllowN_consumes_multiple_tokens(t *testing.T) {
 		t.Fatalf("expected nil, got %v", err)
 	}
 
+}
+
+func TestAllowN_zero_tokens(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 1,
+		Bucket:    1,
+	})
+
+	for range 5 {
+		if err := rl.AllowN(key, 0); err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+	}
+}
+
+func TestAllowN_negative_tokens(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 1,
+		Bucket:    1,
+	})
+
+	for range 5 {
+		// any token count that is <= 0, should behave like zero tokens
+		if err := rl.AllowN(key, -1); err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+	}
 }
 
 func TestAllowN_returns_ErrRateLimited_when_insufficient_tokens(t *testing.T) {
@@ -159,7 +188,26 @@ func TestAllow_lifts_ban_after_duration(t *testing.T) {
 	if err := rl.Allow(key); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
+}
 
+func TestAllow_below_threshold_does_not_ban(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 1,
+		Bucket:    1,
+		Banning: &ratelimiter.BanOptions{
+			Duration:  time.Second + 30*time.Millisecond,
+			Window:    time.Second,
+			Threshold: 3,
+		},
+	})
+
+	rl.Allow(key)
+
+	for range 2 {
+		if err := rl.Allow(key); errors.Is(err, ratelimiter.ErrBanned) {
+			t.Fatalf("expected no ban, got %v", err)
+		}
+	}
 }
 
 func TestStats_empty(t *testing.T) {
@@ -188,7 +236,39 @@ func TestStats_shows_active_visitor(t *testing.T) {
 	if _, ok := stats[key]; !ok {
 		t.Fatalf("expected the key %q to exist", key)
 	}
+}
 
+func TestStats_last_seen_is_recent(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 10,
+		Bucket:    10,
+	})
+
+	rl.Allow(key)
+
+	if time.Since(rl.Stats()[key].LastSeen) > time.Second {
+		t.Fatalf("expected LastSeen to be recent, got %v", rl.Stats()[key].LastSeen)
+	}
+}
+
+func TestStats_banned_until_is_set(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 1,
+		Bucket:    1,
+		Banning: &ratelimiter.BanOptions{
+			Duration:  time.Second,
+			Window:    time.Second,
+			Threshold: 1,
+		},
+	})
+
+	for range 2 {
+		rl.Allow(key)
+	}
+
+	if val := rl.Stats()[key]; !val.BannedUntil.After(time.Now()) {
+		t.Fatalf("expected BannedUntil to be in the future, got %v", val.BannedUntil)
+	}
 }
 
 func TestStats_banned_flag(t *testing.T) {
@@ -286,4 +366,149 @@ func TestAllow_independent_visitors(t *testing.T) {
 	if rl.Stats()[key] == rl.Stats()[key2] {
 		t.Fatalf("expected visitors %q and %q to be different", key, key2)
 	}
+}
+
+func TestCleanup_evicts_idle_visitors(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit:       10,
+		Bucket:          10,
+		CleanupInterval: 15 * time.Millisecond,
+		IdleTimeout:     10 * time.Millisecond,
+	})
+
+	rl.Allow(key)
+
+	time.Sleep(20 * time.Millisecond)
+
+	if _, ok := rl.Stats()[key]; ok {
+		t.Fatalf("expected false, got %v", ok)
+	}
+
+}
+
+func TestCleanup_keeps_active_visitors(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit:       10,
+		Bucket:          10,
+		CleanupInterval: 5 * time.Millisecond,
+		IdleTimeout:     10 * time.Millisecond,
+	})
+
+	rl.Allow(key)
+
+	time.Sleep(5 * time.Millisecond)
+
+	rl.Allow(key)
+
+	time.Sleep(5 * time.Millisecond)
+
+	if _, ok := rl.Stats()[key]; !ok {
+		t.Fatalf("expected false, got %v", ok)
+	}
+}
+
+func TestNew_returns_error_on_invalid_options(t *testing.T) {
+	tests := []struct {
+		name  string
+		apply func(*ratelimiter.Options)
+	}{
+		{"rateLimit", func(o *ratelimiter.Options) { o.RateLimit = -1 }},
+		{"bucket", func(o *ratelimiter.Options) { o.Bucket = -1 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opt := &ratelimiter.Options{}
+			tt.apply(opt)
+			if _, err := ratelimiter.New(opt); err == nil {
+				t.Fatalf("expected err, got nil")
+			}
+		})
+	}
+}
+
+func TestNew_returns_error_on_invalid_banOptions(t *testing.T) {
+	tests := []struct {
+		name  string
+		apply func(*ratelimiter.BanOptions)
+	}{
+		{"banThreshold", func(o *ratelimiter.BanOptions) { o.Threshold = -1 }},
+		{"banWindow", func(o *ratelimiter.BanOptions) { o.Window = -1 }},
+		{"banDuration", func(o *ratelimiter.BanOptions) { o.Duration = -1 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bOpt := &ratelimiter.BanOptions{}
+			tt.apply(bOpt)
+			opt := &ratelimiter.Options{
+				Banning: bOpt,
+			}
+			if _, err := ratelimiter.New(opt); err == nil {
+				t.Fatalf("expected err, got nil")
+			}
+		})
+	}
+}
+
+func TestNew_nil_options(t *testing.T) {
+	_, err := ratelimiter.New(nil)
+	if err == nil {
+		t.Fatal("expected err, got nil")
+	}
+}
+
+func TestStop_prevents_goroutine_leak(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	rl, err := ratelimiter.New(&ratelimiter.Options{
+		RateLimit: 10,
+		Bucket:    10,
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rl.Stop()
+}
+
+func TestStop_is_idempotent(t *testing.T) {
+	rl, err := ratelimiter.New(&ratelimiter.Options{
+		RateLimit: 10,
+		Bucket:    10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rl.Stop()
+	rl.Stop()
+}
+
+func TestAllow_concurrent_access(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 100,
+		Bucket:    100,
+	})
+
+	keys := []string{"192.0.2.1", "192.0.2.2", "192.0.2.3"}
+
+	var wg sync.WaitGroup
+	for i := range 100 {
+		wg.Go(func() { rl.Allow(keys[i%len(keys)]) })
+	}
+	wg.Wait()
+}
+
+func TestStats_concurrent_with_allow(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 100,
+		Bucket:    100,
+	})
+
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Go(func() { rl.Allow(key) })
+	}
+	wg.Go(func() { rl.Stats() })
+	wg.Wait()
 }
