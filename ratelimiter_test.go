@@ -135,7 +135,7 @@ func TestAllow_resets_violations_after_window(t *testing.T) {
 
 }
 
-func TestAllow_lifts_ban_after_durationfunc(t *testing.T) {
+func TestAllow_lifts_ban_after_duration(t *testing.T) {
 	rl := newLimiter(t, &ratelimiter.Options{
 		RateLimit: 1,
 		Bucket:    1,
