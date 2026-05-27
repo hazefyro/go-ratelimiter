@@ -54,6 +54,7 @@ type RateLimiter struct {
 	visitors  map[string]*visitor
 	options   Options
 	stop      chan struct{}
+	stopOnce  sync.Once
 }
 
 // New creates a RateLimiter from the given options. Returns an error if options are invalid.
@@ -171,6 +172,7 @@ func (rl *RateLimiter) Stats() map[string]VisitorStats {
 }
 
 // Stop shuts down the background cleanup goroutine. Must be called when the RateLimiter is no longer needed.
+// Safe to call more than once.
 func (rl *RateLimiter) Stop() {
-	close(rl.stop)
+	rl.stopOnce.Do(func() { close(rl.stop) })
 }
