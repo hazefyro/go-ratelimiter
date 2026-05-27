@@ -162,8 +162,6 @@ func TestAllow_lifts_ban_after_durationfunc(t *testing.T) {
 
 }
 
-// STATS TESTING TODO
-
 func TestStats_empty(t *testing.T) {
 	rl := newLimiter(t, &ratelimiter.Options{
 		RateLimit: 10,
@@ -210,6 +208,53 @@ func TestStats_banned_flag(t *testing.T) {
 
 	if val := rl.Stats()[key]; !val.Banned {
 		t.Fatalf("expected the key %q to be banned", key)
+	}
+}
+
+func TestStats_not_banned_after_expiry(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 1,
+		Bucket:    1,
+		Banning: &ratelimiter.BanOptions{
+			Duration:  time.Second + 30*time.Millisecond,
+			Window:    time.Second,
+			Threshold: 1,
+		},
+	})
+
+	for range 2 {
+		rl.Allow(key)
+	}
+
+	if err := rl.Allow(key); !errors.Is(err, ratelimiter.ErrBanned) {
+		t.Fatalf("expected ErrBanned, got %v", err)
+	}
+
+	time.Sleep(time.Second + 30*time.Millisecond)
+
+	if val := rl.Stats()[key]; val.Banned == true {
+		t.Fatalf("expected false, got %v", val.Banned)
+	}
+
+}
+
+func TestStats_violation_count(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 1,
+		Bucket:    1,
+		Banning: &ratelimiter.BanOptions{
+			Duration:  time.Second + 30*time.Millisecond,
+			Window:    time.Second,
+			Threshold: 3,
+		},
+	})
+
+	for range 3 {
+		rl.Allow(key)
+	}
+
+	if val := rl.Stats()[key]; val.Violations != 2 {
+		t.Fatalf("expected 2, got %v", val.Violations)
 	}
 }
 
