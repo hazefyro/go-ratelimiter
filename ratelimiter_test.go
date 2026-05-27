@@ -164,6 +164,55 @@ func TestAllow_lifts_ban_after_durationfunc(t *testing.T) {
 
 // STATS TESTING TODO
 
+func TestStats_empty(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 10,
+		Bucket:    10,
+	})
+
+	stats := rl.Stats()
+
+	if len(stats) != 0 {
+		t.Fatalf("expected nil, got %v", stats)
+	}
+}
+
+func TestStats_shows_active_visitor(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 10,
+		Bucket:    10,
+	})
+
+	rl.Allow(key)
+
+	stats := rl.Stats()
+
+	if _, ok := stats[key]; !ok {
+		t.Fatalf("expected the key %q to exist", key)
+	}
+
+}
+
+func TestStats_banned_flag(t *testing.T) {
+	rl := newLimiter(t, &ratelimiter.Options{
+		RateLimit: 1,
+		Bucket:    1,
+		Banning: &ratelimiter.BanOptions{
+			Duration:  time.Second + 30*time.Millisecond,
+			Window:    time.Second,
+			Threshold: 1,
+		},
+	})
+
+	for range 2 {
+		rl.Allow(key)
+	}
+
+	if val := rl.Stats()[key]; !val.Banned {
+		t.Fatalf("expected the key %q to be banned", key)
+	}
+}
+
 func TestAllow_creates_visitor_on_first_call(t *testing.T) {
 	rl := newLimiter(t, &ratelimiter.Options{
 		RateLimit: 10,
