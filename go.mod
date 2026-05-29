@@ -1,7 +1,7 @@
-module github.com/haze/go-ratelimiter
+module github.com/hazefyro/go-ratelimiter
 
 go 1.25.0
 
 require golang.org/x/time v0.15.0
 
-require go.uber.org/goleak v1.3.0 // indirect
+require go.uber.org/goleak v1.3.0

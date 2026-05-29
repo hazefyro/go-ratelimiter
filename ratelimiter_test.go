@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	ratelimiter "github.com/haze/go-ratelimiter"
+	ratelimiter "github.com/hazefyro/go-ratelimiter"
 	"go.uber.org/goleak"
 )
 
