@@ -12,9 +12,9 @@ import (
 
 const key = "192.0.2.1"
 
-func newLimiter(t *testing.T, opts *ratelimiter.Options) *ratelimiter.RateLimiter {
+func newLimiter(t *testing.T, rateLimit, bucket int, opts ...ratelimiter.Option) *ratelimiter.RateLimiter {
 	t.Helper()
-	rl, err := ratelimiter.New(opts)
+	rl, err := ratelimiter.New(rateLimit, bucket, opts...)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -23,10 +23,7 @@ func newLimiter(t *testing.T, opts *ratelimiter.Options) *ratelimiter.RateLimite
 }
 
 func TestAllow_permits_under_limit(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    10,
-	})
+	rl := newLimiter(t, 10, 10)
 
 	if err := rl.Allow(key); err != nil {
 		t.Fatalf("expected nil, got %v", err)
@@ -34,10 +31,7 @@ func TestAllow_permits_under_limit(t *testing.T) {
 }
 
 func TestAllow_returns_ErrRateLimited(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-	})
+	rl := newLimiter(t, 1, 1)
 
 	rl.Allow(key)
 
@@ -48,10 +42,7 @@ func TestAllow_returns_ErrRateLimited(t *testing.T) {
 }
 
 func TestAllowN_consumes_multiple_tokens(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    5,
-	})
+	rl := newLimiter(t, 10, 5)
 
 	if err := rl.AllowN(key, 5); err != nil {
 		t.Fatalf("expected nil, got %v", err)
@@ -60,10 +51,7 @@ func TestAllowN_consumes_multiple_tokens(t *testing.T) {
 }
 
 func TestAllowN_zero_tokens(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-	})
+	rl := newLimiter(t, 1, 1)
 
 	for range 5 {
 		if err := rl.AllowN(key, 0); err != nil {
@@ -73,10 +61,7 @@ func TestAllowN_zero_tokens(t *testing.T) {
 }
 
 func TestAllowN_negative_tokens(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-	})
+	rl := newLimiter(t, 1, 1)
 
 	for range 5 {
 		// any token count that is <= 0, should behave like zero tokens
@@ -87,10 +72,7 @@ func TestAllowN_negative_tokens(t *testing.T) {
 }
 
 func TestAllowN_returns_ErrRateLimited_when_insufficient_tokens(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    5,
-	})
+	rl := newLimiter(t, 10, 5)
 
 	if err := rl.AllowN(key, 6); !errors.Is(err, ratelimiter.ErrRateLimited) {
 		t.Fatalf("expected ErrRateLimited, got %v", err)
@@ -98,15 +80,11 @@ func TestAllowN_returns_ErrRateLimited_when_insufficient_tokens(t *testing.T) {
 }
 
 func TestAllow_bans_after_threshold(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-		Banning: &ratelimiter.BanOptions{
-			Duration:  time.Second + 30*time.Millisecond,
-			Window:    time.Second,
-			Threshold: 1,
-		},
-	})
+	rl := newLimiter(t, 1, 1, ratelimiter.WithBanning(ratelimiter.BanOptions{
+		Duration:  time.Second + 30*time.Millisecond,
+		Window:    time.Second,
+		Threshold: 1,
+	}))
 
 	for range 2 {
 		rl.Allow(key)
@@ -119,15 +97,11 @@ func TestAllow_bans_after_threshold(t *testing.T) {
 }
 
 func TestAllow_returns_ErrBanned_while_banned(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-		Banning: &ratelimiter.BanOptions{
-			Duration:  time.Second + 30*time.Millisecond,
-			Window:    time.Second,
-			Threshold: 1,
-		},
-	})
+	rl := newLimiter(t, 1, 1, ratelimiter.WithBanning(ratelimiter.BanOptions{
+		Duration:  time.Second + 30*time.Millisecond,
+		Window:    time.Second,
+		Threshold: 1,
+	}))
 
 	for range 2 {
 		rl.Allow(key)
@@ -142,15 +116,11 @@ func TestAllow_returns_ErrBanned_while_banned(t *testing.T) {
 }
 
 func TestAllow_resets_violations_after_window(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-		Banning: &ratelimiter.BanOptions{
-			Duration:  time.Second + 30*time.Millisecond,
-			Window:    time.Second,
-			Threshold: 2,
-		},
-	})
+	rl := newLimiter(t, 1, 1, ratelimiter.WithBanning(ratelimiter.BanOptions{
+		Duration:  time.Second + 30*time.Millisecond,
+		Window:    time.Second,
+		Threshold: 2,
+	}))
 
 	for range 2 {
 		rl.Allow(key)
@@ -165,15 +135,11 @@ func TestAllow_resets_violations_after_window(t *testing.T) {
 }
 
 func TestAllow_lifts_ban_after_duration(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-		Banning: &ratelimiter.BanOptions{
-			Duration:  time.Second + 30*time.Millisecond,
-			Window:    time.Second,
-			Threshold: 1,
-		},
-	})
+	rl := newLimiter(t, 1, 1, ratelimiter.WithBanning(ratelimiter.BanOptions{
+		Duration:  time.Second + 30*time.Millisecond,
+		Window:    time.Second,
+		Threshold: 1,
+	}))
 
 	for range 2 {
 		rl.Allow(key)
@@ -191,15 +157,11 @@ func TestAllow_lifts_ban_after_duration(t *testing.T) {
 }
 
 func TestAllow_below_threshold_does_not_ban(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-		Banning: &ratelimiter.BanOptions{
-			Duration:  time.Second + 30*time.Millisecond,
-			Window:    time.Second,
-			Threshold: 3,
-		},
-	})
+	rl := newLimiter(t, 1, 1, ratelimiter.WithBanning(ratelimiter.BanOptions{
+		Duration:  time.Second + 30*time.Millisecond,
+		Window:    time.Second,
+		Threshold: 3,
+	}))
 
 	rl.Allow(key)
 
@@ -211,10 +173,7 @@ func TestAllow_below_threshold_does_not_ban(t *testing.T) {
 }
 
 func TestStats_empty(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    10,
-	})
+	rl := newLimiter(t, 10, 10)
 
 	stats := rl.Stats()
 
@@ -224,10 +183,7 @@ func TestStats_empty(t *testing.T) {
 }
 
 func TestStats_shows_active_visitor(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    10,
-	})
+	rl := newLimiter(t, 10, 10)
 
 	rl.Allow(key)
 
@@ -239,10 +195,7 @@ func TestStats_shows_active_visitor(t *testing.T) {
 }
 
 func TestStats_last_seen_is_recent(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    10,
-	})
+	rl := newLimiter(t, 10, 10)
 
 	rl.Allow(key)
 
@@ -252,15 +205,11 @@ func TestStats_last_seen_is_recent(t *testing.T) {
 }
 
 func TestStats_banned_until_is_set(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-		Banning: &ratelimiter.BanOptions{
-			Duration:  time.Second,
-			Window:    time.Second,
-			Threshold: 1,
-		},
-	})
+	rl := newLimiter(t, 1, 1, ratelimiter.WithBanning(ratelimiter.BanOptions{
+		Duration:  time.Second,
+		Window:    time.Second,
+		Threshold: 1,
+	}))
 
 	for range 2 {
 		rl.Allow(key)
@@ -272,15 +221,11 @@ func TestStats_banned_until_is_set(t *testing.T) {
 }
 
 func TestStats_banned_flag(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-		Banning: &ratelimiter.BanOptions{
-			Duration:  time.Second + 30*time.Millisecond,
-			Window:    time.Second,
-			Threshold: 1,
-		},
-	})
+	rl := newLimiter(t, 1, 1, ratelimiter.WithBanning(ratelimiter.BanOptions{
+		Duration:  time.Second + 30*time.Millisecond,
+		Window:    time.Second,
+		Threshold: 1,
+	}))
 
 	for range 2 {
 		rl.Allow(key)
@@ -292,15 +237,11 @@ func TestStats_banned_flag(t *testing.T) {
 }
 
 func TestStats_not_banned_after_expiry(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-		Banning: &ratelimiter.BanOptions{
-			Duration:  time.Second + 30*time.Millisecond,
-			Window:    time.Second,
-			Threshold: 1,
-		},
-	})
+	rl := newLimiter(t, 1, 1, ratelimiter.WithBanning(ratelimiter.BanOptions{
+		Duration:  time.Second + 30*time.Millisecond,
+		Window:    time.Second,
+		Threshold: 1,
+	}))
 
 	for range 2 {
 		rl.Allow(key)
@@ -319,15 +260,11 @@ func TestStats_not_banned_after_expiry(t *testing.T) {
 }
 
 func TestStats_violation_count(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 1,
-		Bucket:    1,
-		Banning: &ratelimiter.BanOptions{
-			Duration:  time.Second + 30*time.Millisecond,
-			Window:    time.Second,
-			Threshold: 3,
-		},
-	})
+	rl := newLimiter(t, 1, 1, ratelimiter.WithBanning(ratelimiter.BanOptions{
+		Duration:  time.Second + 30*time.Millisecond,
+		Window:    time.Second,
+		Threshold: 3,
+	}))
 
 	for range 3 {
 		rl.Allow(key)
@@ -339,10 +276,7 @@ func TestStats_violation_count(t *testing.T) {
 }
 
 func TestAllow_creates_visitor_on_first_call(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    10,
-	})
+	rl := newLimiter(t, 10, 10)
 
 	rl.Allow(key)
 
@@ -352,10 +286,7 @@ func TestAllow_creates_visitor_on_first_call(t *testing.T) {
 }
 
 func TestAllow_independent_visitors(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    10,
-	})
+	rl := newLimiter(t, 10, 10)
 
 	var key2 = "192.168.100.1"
 
@@ -369,12 +300,10 @@ func TestAllow_independent_visitors(t *testing.T) {
 }
 
 func TestCleanup_evicts_idle_visitors(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit:       10,
-		Bucket:          10,
-		CleanupInterval: 15 * time.Millisecond,
-		IdleTimeout:     10 * time.Millisecond,
-	})
+	rl := newLimiter(t, 10, 10,
+		ratelimiter.WithCleanupInterval(15*time.Millisecond),
+		ratelimiter.WithIdleTimeout(10*time.Millisecond),
+	)
 
 	rl.Allow(key)
 
@@ -387,12 +316,10 @@ func TestCleanup_evicts_idle_visitors(t *testing.T) {
 }
 
 func TestCleanup_keeps_active_visitors(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit:       10,
-		Bucket:          10,
-		CleanupInterval: 5 * time.Millisecond,
-		IdleTimeout:     10 * time.Millisecond,
-	})
+	rl := newLimiter(t, 10, 10,
+		ratelimiter.WithCleanupInterval(5*time.Millisecond),
+		ratelimiter.WithIdleTimeout(10*time.Millisecond),
+	)
 
 	rl.Allow(key)
 
@@ -409,17 +336,15 @@ func TestCleanup_keeps_active_visitors(t *testing.T) {
 
 func TestNew_returns_error_on_invalid_options(t *testing.T) {
 	tests := []struct {
-		name  string
-		apply func(*ratelimiter.Options)
+		name              string
+		rateLimit, bucket int
 	}{
-		{"rateLimit", func(o *ratelimiter.Options) { o.RateLimit = -1 }},
-		{"bucket", func(o *ratelimiter.Options) { o.Bucket = -1 }},
+		{"rateLimit", -1, 1},
+		{"bucket", 1, -1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opt := &ratelimiter.Options{}
-			tt.apply(opt)
-			if _, err := ratelimiter.New(opt); err == nil {
+			if _, err := ratelimiter.New(tt.rateLimit, tt.bucket); err == nil {
 				t.Fatalf("expected err, got nil")
 			}
 		})
@@ -428,29 +353,24 @@ func TestNew_returns_error_on_invalid_options(t *testing.T) {
 
 func TestNew_returns_error_on_invalid_banOptions(t *testing.T) {
 	tests := []struct {
-		name  string
-		apply func(*ratelimiter.BanOptions)
+		name string
+		ban  ratelimiter.BanOptions
 	}{
-		{"banThreshold", func(o *ratelimiter.BanOptions) { o.Threshold = -1 }},
-		{"banWindow", func(o *ratelimiter.BanOptions) { o.Window = -1 }},
-		{"banDuration", func(o *ratelimiter.BanOptions) { o.Duration = -1 }},
+		{"banThreshold", ratelimiter.BanOptions{Threshold: -1}},
+		{"banWindow", ratelimiter.BanOptions{Window: -1}},
+		{"banDuration", ratelimiter.BanOptions{Duration: -1}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bOpt := &ratelimiter.BanOptions{}
-			tt.apply(bOpt)
-			opt := &ratelimiter.Options{
-				Banning: bOpt,
-			}
-			if _, err := ratelimiter.New(opt); err == nil {
+			if _, err := ratelimiter.New(1, 1, ratelimiter.WithBanning(tt.ban)); err == nil {
 				t.Fatalf("expected err, got nil")
 			}
 		})
 	}
 }
 
-func TestNew_nil_options(t *testing.T) {
-	_, err := ratelimiter.New(nil)
+func TestNew_zero_values(t *testing.T) {
+	_, err := ratelimiter.New(0, 0)
 	if err == nil {
 		t.Fatal("expected err, got nil")
 	}
@@ -459,10 +379,7 @@ func TestNew_nil_options(t *testing.T) {
 func TestStop_prevents_goroutine_leak(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	rl, err := ratelimiter.New(&ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    10,
-	})
+	rl, err := ratelimiter.New(10, 10)
 
 	if err != nil {
 		t.Fatal(err)
@@ -472,10 +389,7 @@ func TestStop_prevents_goroutine_leak(t *testing.T) {
 }
 
 func TestStop_is_idempotent(t *testing.T) {
-	rl, err := ratelimiter.New(&ratelimiter.Options{
-		RateLimit: 10,
-		Bucket:    10,
-	})
+	rl, err := ratelimiter.New(10, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,10 +399,7 @@ func TestStop_is_idempotent(t *testing.T) {
 }
 
 func TestAllow_concurrent_access(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 100,
-		Bucket:    100,
-	})
+	rl := newLimiter(t, 100, 100)
 
 	keys := []string{"192.0.2.1", "192.0.2.2", "192.0.2.3"}
 
@@ -500,10 +411,7 @@ func TestAllow_concurrent_access(t *testing.T) {
 }
 
 func TestStats_concurrent_with_allow(t *testing.T) {
-	rl := newLimiter(t, &ratelimiter.Options{
-		RateLimit: 100,
-		Bucket:    100,
-	})
+	rl := newLimiter(t, 100, 100)
 
 	var wg sync.WaitGroup
 	for range 100 {

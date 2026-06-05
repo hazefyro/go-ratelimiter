@@ -13,10 +13,7 @@ go get github.com/haze/go-ratelimiter
 ### Basic rate limiting
 
 ```go
-rl, err := ratelimiter.New(&ratelimiter.Options{
-    RateLimit: 10, // tokens per second
-    Bucket:    10, // burst capacity
-})
+rl, err := ratelimiter.New(10, 10) // rate limit (tokens/sec), bucket (burst)
 if err != nil {
     log.Fatal(err)
 }
@@ -32,15 +29,13 @@ if err := rl.Allow("192.0.2.1"); err != nil {
 Visitors that hit the rate limit too many times get banned for a duration.
 
 ```go
-rl, err := ratelimiter.New(&ratelimiter.Options{
-    RateLimit: 10,
-    Bucket:    10,
-    Banning: &ratelimiter.BanOptions{
-        Threshold: 5,             // violations before ban
-        Window:    time.Minute,   // violation tracking window
+rl, err := ratelimiter.New(10, 10,
+    ratelimiter.WithBanning(ratelimiter.BanOptions{
+        Threshold: 5,           // violations before ban
+        Window:    time.Minute, // violation tracking window
         Duration:  15 * time.Minute,
-    },
-})
+    }),
+)
 ```
 
 `Allow` returns `ErrRateLimited` or `ErrBanned` so callers can distinguish:
@@ -69,13 +64,19 @@ Built-in helpers for extracting keys from requests:
 | `RemoteAddrKey` | `r.RemoteAddr` |
 | `HeaderKey(h)` | any header |
 
-## Options
+## Configuration
 
-| Field | Default | Description |
+`New(rateLimit, bucket int, opts ...Option)` takes the two required values
+positionally; everything else is configured with `With*` options.
+
+| Argument | Description |
+|---|---|
+| `rateLimit` | tokens replenished per second (required) |
+| `bucket` | burst capacity (required) |
+
+| Option | Default | Description |
 |---|---|---|
-| `RateLimit` | required | tokens per second |
-| `Bucket` | required | burst capacity |
-| `IdleTimeout` | 5m | evict visitors inactive for this long |
-| `CleanupInterval` | 1m | how often to run eviction |
-| `KeyFunc` | `RealIPKey` | extracts the rate limit key from a request |
-| `Banning` | nil | optional ban config, see `BanOptions` |
+| `WithIdleTimeout(d)` | 5m | evict visitors inactive for this long |
+| `WithCleanupInterval(d)` | 1m | how often to run eviction |
+| `WithKeyFunc(f)` | `RealIPKey` | extracts the rate limit key from a request |
+| `WithBanning(b)` | disabled | enable banning, see `BanOptions` |

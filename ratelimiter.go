@@ -6,10 +6,7 @@
 //
 // Example (basic):
 //
-//	rl, err := ratelimiter.New(&ratelimiter.Options{
-//	    RateLimit: 10,
-//	    Bucket:    10,
-//	})
+//	rl, err := ratelimiter.New(10, 10)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -26,15 +23,13 @@
 //
 // Example (with banning):
 //
-//	rl, err := ratelimiter.New(&ratelimiter.Options{
-//	    RateLimit: 10,
-//	    Bucket:    10,
-//	    Banning: &ratelimiter.BanOptions{
+//	rl, err := ratelimiter.New(10, 10,
+//	    ratelimiter.WithBanning(ratelimiter.BanOptions{
 //	        Threshold: 5,
 //	        Window:    time.Minute,
 //	        Duration:  15 * time.Minute,
-//	    },
-//	})
+//	    }),
+//	)
 //
 // Key extraction is handled by a [KeyFunc]. Built-in options include [RealIPKey],
 // [ForwardedForKey], [CFConnectingIPKey], [RemoteAddrKey], and [HeaderKey].
@@ -52,34 +47,31 @@ type RateLimiter struct {
 	mu        sync.RWMutex
 	rateLimit rate.Limit
 	visitors  map[string]*visitor
-	options   Options
+	config    Config
 	stop      chan struct{}
 	stopOnce  sync.Once
 }
 
-// New creates a RateLimiter from the given options. Returns an error if options are invalid.
-// Callers must call Stop when done to release the background cleanup goroutine.
-func New(options *Options) (*RateLimiter, error) {
-	if options == nil {
-		options = &Options{}
+// New creates a RateLimiter with the given rate limit (tokens replenished per second)
+// and bucket size (maximum burst). Additional behavior is configured through the With*
+// options. Returns an error if the configuration is invalid. Callers must call Stop when
+// done to release the background cleanup goroutine.
+func New(rateLimit, bucket int, opts ...Option) (*RateLimiter, error) {
+	cfg := &Config{
+		rateLimit: rateLimit,
+		bucket:    bucket,
 	}
-	if options.KeyFunc == nil {
-		options.KeyFunc = RealIPKey
+	for _, opt := range append(defaultOptions(), opts...) {
+		opt(cfg)
 	}
-	if options.CleanupInterval == 0 {
-		options.CleanupInterval = time.Minute
-	}
-	if options.IdleTimeout == 0 {
-		options.IdleTimeout = 5 * time.Minute
-	}
-	if err := options.validate(); err != nil {
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 
 	rl := &RateLimiter{
 		visitors:  make(map[string]*visitor),
-		rateLimit: rate.Limit(options.RateLimit),
-		options:   *options,
+		rateLimit: rate.Limit(cfg.rateLimit),
+		config:    *cfg,
 		stop:      make(chan struct{}),
 	}
 
@@ -104,7 +96,7 @@ func (rl *RateLimiter) AllowN(key string, n int) error {
 	v, ok := rl.visitors[key]
 	if !ok {
 		v = &visitor{
-			limiter:     rate.NewLimiter(rl.rateLimit, rl.options.Bucket),
+			limiter:     rate.NewLimiter(rl.rateLimit, rl.config.bucket),
 			windowStart: now,
 		}
 		rl.visitors[key] = v
@@ -115,16 +107,16 @@ func (rl *RateLimiter) AllowN(key string, n int) error {
 		return ErrBanned
 	}
 
-	if rl.options.Banning != nil && time.Since(v.windowStart) > rl.options.Banning.Window {
+	if rl.config.banning != nil && time.Since(v.windowStart) > rl.config.banning.Window {
 		v.violations = 0
 		v.windowStart = now
 	}
 
 	if !v.limiter.AllowN(now, n) {
-		if rl.options.Banning != nil {
+		if rl.config.banning != nil {
 			v.violations++
-			if v.violations >= rl.options.Banning.Threshold {
-				v.bannedUntil = now.Add(rl.options.Banning.Duration)
+			if v.violations >= rl.config.banning.Threshold {
+				v.bannedUntil = now.Add(rl.config.banning.Duration)
 				v.violations = 0
 			}
 		}
@@ -135,14 +127,14 @@ func (rl *RateLimiter) AllowN(key string, n int) error {
 }
 
 func (rl *RateLimiter) cleanup() {
-	ticker := time.NewTicker(rl.options.CleanupInterval)
+	ticker := time.NewTicker(rl.config.cleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			rl.mu.Lock()
 			for ip, v := range rl.visitors {
-				if time.Since(v.lastSeen) > rl.options.IdleTimeout {
+				if time.Since(v.lastSeen) > rl.config.idleTimeout {
 					delete(rl.visitors, ip)
 				}
 			}
